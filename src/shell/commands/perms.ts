@@ -1,11 +1,12 @@
 import { Command } from 'commander';
 import * as acl_perms from '../../commands/solid-perms_acl';
-import { setPermission, listPermissions, IPermissionOperation } from '../../commands/solid-perms';
+import { setPermission, listPermissions, IPermissionOperation, IPermissionListing } from '../../commands/solid-perms';
 import authenticate from '../../authentication/authenticate';
-import { addEnvOptions, changeUrlPrefixes, getAndNormalizeURL } from '../../utils/shellutils';
-import { writeErrorString } from '../../utils/util';
+import { addEnvOptions, changeUrlPrefixes } from '../../utils/shellutils';
+import { discoverAccessMechanism, writeErrorString } from '../../utils/util';
 import chalk from 'chalk';
 import SolidCommand from './SolidCommand';
+import { acp_ess_2, hasAccessibleAcl, WithAcl } from "@inrupt/solid-client";
 const Table = require('cli-table');
 
 export default class PermsCommand extends SolidCommand { 
@@ -23,7 +24,6 @@ export default class PermsCommand extends SolidCommand {
     access
       .command('list')
       .argument('<url>', 'Resource URL')
-      .option('--acl', 'Displays ACL specific information such as group and default access')
       .option('-p, --pretty', 'Pretty format')
       .option('-v, --verbose', 'Log all operations') 
       .action(async (url: string, options: any) => {
@@ -33,16 +33,36 @@ export default class PermsCommand extends SolidCommand {
         options.fetch = authenticationInfo.fetch
         url = await changeUrlPrefixes(authenticationInfo, url)
 
-        if (options.acl) {
-          const listings = await acl_perms.listPermissions(url, options)
-          if (listings) formatACLPermissionListing(url, listings, options)
-        } else {
-          const listings = await listPermissions(url, options)
-          if (listings) formatPermissionListing(url, listings, options)
+        const { acp, acl } = await discoverAccessMechanism(url, options.fetch)
+        if ( !acp && !acl ) {
+          if (options.verbose) writeErrorString(`Could not list permissions for ${url}`, { message: "Could not find attached WAC or ACP management resource." }, options)
+          return;
         }
+        if (acl) {
+          try {
+            const listings = await acl_perms.listPermissions(url, options)
+            if (listings?.access.agent || listings?.access.public) {
+              await formatACLPermissionListing(url, listings, options)
+              return;
+            }   
+          } catch (e) {
+            if (options.verbose) writeErrorString('Unable to list permissions using WAC', e, options)
+          }
+        }
+        if (acp) {
+          try {
+            const listings = await listPermissions(url, options)
+            if (listings?.access.agent || listings?.access.public) {
+              await formatPermissionListing(url, listings, options)
+              return;
+            }
+          } catch (e) {
+            if (options.verbose) writeErrorString('Unable to list permissions for ACP', e, options)
+          }
+        }
+        
         if (this.mayExit) process.exit(0)
       })
-
 
     access
       .command('set')
@@ -54,9 +74,8 @@ export default class PermsCommand extends SolidCommand {
       For the current authenticated user please set id to "u".
       For specific agents, set id to be the agent webid.
       `)
-      .option('--acl', 'Enables ACL specific operations --default and --group')
-      .option('--default', 'Set the defined permissions as default (only in --acl mode)')
-      .option('--group', 'Process identifier as a group identifier (only in --acl mode)')
+      .option('--default', 'Set the defined permissions as default (only for pods on a WAC-based solid server)')
+      .option('--group', 'Process identifier as a group identifier (only for pods on a WAC-based solid server)')
       .option('-v, --verbose', 'Log all operations') // Should this be default?
       .action( async (url: string, permissions: string[], options: any) => {
 
@@ -75,14 +94,9 @@ export default class PermsCommand extends SolidCommand {
             }
             let id = splitPerm[0]
             const permissionOptions = splitPerm[1].split('')
-            let type;
-            const acl = options.acl
+            let type = 'agent';
 
             if (options.group) {
-              if (!acl) {
-                writeErrorString('Cannot set group permissions outside of --acl mode.', options);
-                process.exit(0)
-              }
               type = 'group'
             } else if (id === 'p') {
               type = 'public'
@@ -91,7 +105,6 @@ export default class PermsCommand extends SolidCommand {
                 writeErrorString('Could not autmatically fill in webId of authenticated user.', 'Please make sure you have an authenticated session to auto-fill your webId', options);
                 process.exit(0)
               }
-              type = 'agent'
               id = authenticationInfo.webId
             } 
             const read = permissionOptions.indexOf('r') !== -1
@@ -99,23 +112,31 @@ export default class PermsCommand extends SolidCommand {
             const append = permissionOptions.indexOf('a') !== -1
             const control = permissionOptions.indexOf('c') !== -1
             const def = options.default
-            if (options.default && !options.acl) {
-              writeErrorString('Cannot set default permissions outside of --acl mode.', options);
-              process.exit(0)
-            }
-            return ({ type, id, read, write, append, control, default: def, acl } as IPermissionOperation)
+            return ({ type, id, read, write, append, control, default: def } as IPermissionOperation)
           })
-          try {
-            for (let permission of parsedPermissions) {
-              if (permission.acl) {
-                await acl_perms.changePermissions(url, parsedPermissions, options)
-              } else {
-                await setPermission(url, parsedPermissions, options)
-              }
-
+          for (let permission of parsedPermissions) {
+            const { acp, acl } = await discoverAccessMechanism(url, options.fetch)
+            if ( !acp && !acl ) {
+              if (options.verbose) writeErrorString(`Could not set permissions for ${permission.id}`, { message: "Could not find attached WAC or ACP management resource." }, options)
+                continue;
             }
-          } catch (e) {
-            if (options.verbose) writeErrorString(`Could not update permissions for resource at ${url}`, e, options)
+            if (acp) {
+              try {
+                if (options.group || options.default) throw new Error("Cannot set WAC-specific options such as group and default for non-WAC environments ")
+                await setPermission(url, [permission], options)
+                return;
+              } catch (e) {
+                if (options.verbose) writeErrorString(`Could not set permissions for ${permission.id} using ACP`, e, options)
+              }
+            } 
+            if (acl) {
+              try {
+                await acl_perms.changePermissions(url, [permission], options)
+                return;
+              } catch (e) {
+                if (options.verbose) writeErrorString(`Could not set permissions for ${permission.id} using WAC`, e, options)
+              }
+            }
           }
         }
         catch (e) {
@@ -150,7 +171,7 @@ export default class PermsCommand extends SolidCommand {
 
 
 
-
+// todo: unduplicate these functions for universal and ACL
 function formatPermissionListing(url: string, permissions: any, options: any) {
   let formattedString = ``    
   let formattedPerms = permissions.access 
@@ -178,7 +199,7 @@ function formatPermissionListing(url: string, permissions: any, options: any) {
     if (!isEmpty(formattedPerms.agent)) {
       table.push([chalk.bold('Agent'), '', '', '', ''])
       for (let id of Object.keys(formattedPerms.agent)) {
-        const control = formattedPerms.agent[id].controlRead && formattedPerms.agent[id].controlWrite
+        const control = formattedPerms.agent[id].control || (formattedPerms.agent[id].controlRead && formattedPerms.agent[id].controlWrite)
         table.push([
           id,
           formattedPerms.agent[id].read || 'false',
@@ -189,7 +210,7 @@ function formatPermissionListing(url: string, permissions: any, options: any) {
       }
     }
     if (!isEmpty(formattedPerms.public)) {
-      const control = formattedPerms.public.controlRead && formattedPerms.public.controlWrite
+      const control = formattedPerms.public.control || (formattedPerms.public.controlRead && formattedPerms.public.controlWrite)
       table.push([chalk.bold('Public'), '', '', '', ''])
       table.push([
         chalk.blue('#public'),

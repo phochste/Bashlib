@@ -1,5 +1,6 @@
 import { FetchError, getResourceInfo } from "@inrupt/solid-client" 
 import { setOptionDefaults, ICommandOptions } from './solid-command';
+import { resourceExists } from "../utils/util";
 const mime = require('mime-types');
 
 export interface ICommandOptionsTouch extends ICommandOptions{ 
@@ -14,14 +15,13 @@ export default async function touch(url: string, options?: ICommandOptionsTouch)
         throw new Error('Can\'t touch containers only resources')
     }
 
-    let urlExists = await resourceExists(url, commandOptions);
+    let urlExists = await resourceExists(url, commandOptions.fetch);
     
     if (urlExists) {
         if (commandOptions.verbose) commandOptions.logger.log(`Remote file already exists`)
     }
     else {
-        let path = url.replace(/.*\//,'')
-        let mimetype = mime.lookup(path)
+        let path = url.replace(/.*\//,'') // todo: remove this? Might be leftover from shell experiment
 
         let contentType = options?.contentType
 
@@ -48,23 +48,6 @@ export default async function touch(url: string, options?: ICommandOptionsTouch)
         }
         else {
             throw new Error(`HTTP Error Response requesting ${url}: ${res.status} ${res.statusText}`)
-        }
-    }
-}
-
-export async function resourceExists(url: string, options: any) {
-    let fetch = options.fetch;
-
-    try {
-        let info = await getResourceInfo(url, { fetch: fetch })
-        return true;
-    }
-    catch (e) {
-        if (e instanceof FetchError && e.response.status === 404) {
-            return false;
-        } 
-        else {
-            return undefined;
         }
     }
 }

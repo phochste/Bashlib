@@ -1,25 +1,41 @@
 # Bashlib
-This repository contains a suite of functionality to facilitate use and development for Solid, mainly focused on supporting the [Community Solid Server](https://github.com/CommunitySolidServer/CommunitySolidServer).
-The **[Bashlib-css](/bashlib/css)** library provides functionality for pod-creation and authentication options that are mostly restricted in compatilibty with the [Community Solid Server](https://github.com/CommunitySolidServer/CommunitySolidServer).
-The **[Bashlib-solid](/bashlib/solid)** library provides functionality to interact with Solid environments from Node.JS and the CLI, providing shell-like functionality to facilitate the use of and development for Solid for people without knowledge of Solid or Linked Data Platform (LDP).
+This repository contains a suite of functionality to facilitate use and development for Solid
+
 
 ## Requirements
 
 - Node >= 16.0.0
 
 ## Setup
-Using github
+**Using github**
 ``` 
 git clone git@github.com:SolidLabResearch/Bashlib.git
 cd Bashlib
 npm install 
 npm run build
 ```
+After the install, add an alias to your `.bashrc` for convenience:
+```
+alias sld="node /path/to/folder/.../bin/solid.js"
+```
+**Using NPX**
+```
+npx solid-bashlib
+```
+This will automatically install any dependencies.
+You can add an alias to your `.bashrc` for convenience:
+```
+alias sld="npx solid-bashlib"
+```
 
-Using NPM
-```
-npm install solid-bashlib
-```
+**Note that while more straightforward, using NPX incurs a performance penalty of up to 1 second!
+Consider a github install if you plan to use this tool regularly!**
+
+
+## Documentation
+For a tutorial and documentation, see [the documentation website](solidlabresearch.github.io/Bashlib/)
+
+<!--
 
 ## Synopsis
 
@@ -66,6 +82,8 @@ node bin/solid.js cp local.txt root:/private/
 This repo uses [release-it](https://www.npmjs.com/package/release-it) to manage SemVer version numbers, create GitHub releases and publish to npm.
 
 Run `npm run release` and follow the intructions on the CLI. Don't forget to create a [personal access token](https://github.com/settings/tokens) and expose it through the `GITHUB_TOKEN` environment variable, or the github release won't work. For more information, visit the `release-it` docs.
+
+-->
 
 ### Bashlib features in progress
 
